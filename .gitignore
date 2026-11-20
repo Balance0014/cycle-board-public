@@ -1,0 +1,7 @@
+.DS_Store
+.venv/
+__pycache__/
+build/
+data/raw/
+# 本地跑 XEN 同步时生成。xen.pub 不允许把抓来的数据集再发布，所以不要提交。
+data/xen_state.json
