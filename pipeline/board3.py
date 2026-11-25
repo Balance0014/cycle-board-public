@@ -37,7 +37,7 @@ class Study:
         self.px = {"标普": self.sp,
                    "黄金": {k: v for k, v in monthly("gold").items() if k <= self.obs_end and k >= ym(K.GOLD_START)},
                    "原油": {k: v for k, v in monthly("oil").items() if k <= self.obs_end and k >= ym(K.OIL_START)}}
-        cpi = monthly("cpi")
+        cpi = self.cpi = monthly("cpi")
         self.infl = {k: (cpi[k] / cpi[k - 12] - 1) * 100 for k in cpi if k - 12 in cpi}   # 物价比一年前涨了多少（%）
         self.starts = sorted(k for k, v in self.rec.items() if v == 1 and self.rec.get(k - 1, 0) == 0)
         self.ends = sorted(k for k, v in self.rec.items() if v == 1 and self.rec.get(k + 1, 0) == 0)
@@ -233,19 +233,30 @@ def build():
                   "平时值": avg}
 
     # 现在在哪个阶段（实时，跟着数据走，不用认可）
+    # 阶段要活动指数和物价同比两样都有：取两样都有的最新一个月（11-24 云端崩过：活动指数已有 10 月，
+    # 但 10 月物价同比算不出——一年前那个月官方没公布物价，直接按活动指数最新月份去取就 KeyError，整次更新失败）
     kcf = max(S.cf)
-    v = S.cf[kcf]
-    ci, ci0 = S.infl[kcf], S.infl[kcf - K.INFL_LAG]
-    ph = S.stage(kcf, K.INFL_LAG)
+    kst = max(k for k in S.cf if S.stage(k, K.INFL_LAG))
+    v = S.cf[kst]
+    ci, ci0 = S.infl[kst], S.infl[kst - K.INFL_LAG]
+    ph = S.stage(kst, K.INFL_LAG)
     near = abs(v) < K.PHASE_NEAR
     now_cell = next(c for c in cells if c["名"] == ph)
-    now = {"字": f"{ph}阶段 · 活动指数 {v:+.2f}（{ym_date(kcf).month}月，{updates('cfnai')}"
+    gap = gap_why = ""   # 活动指数比阶段新：说清新那个月增长怎样、为什么阶段还按旧月，不让人以为数停了
+    if kcf != kst:
+        why = "一年前那月官方没公布" if kcf in S.cpi and kcf - 12 not in S.cpi else "物价还没公布"
+        vn = S.cf[kcf]
+        # 页面离高度上限近（加一小句就超），图上不加字：活动指数最新月的值本页报警卡上就有；缺月原因放悬停和菜单第一行
+        gap = f"（{ym_date(kcf).month}月缺物价）"
+        gap_why = f"{ym_date(kcf).month}月活动指数 {vn:+.2f}；{ym_date(kcf).month}月缺物价同比：{why}"
+    now = {"字": f"{ph}阶段 · 活动指数 {v:+.2f}（{ym_date(kst).month}月，{updates('cfnai')}"
                  + ("，贴着 0" if near else "") + f"）；物价比去年涨 {ci:.2f}%，{K.INFL_LAG} 个月前 {ci0:.2f}%",
            "阶段": ph,
-           "依据": f"活动指数每月下旬公布上个月的数；物价同比{'升' if ci > ci0 else '降'}，所以通胀在{'升' if ci > ci0 else '降'}" + ("；活动指数贴着 0，随时会变" if near else "")}
+           "依据": gap_why or (f"活动指数每月下旬公布上个月的数；物价同比{'升' if ci > ci0 else '降'}，所以通胀在{'升' if ci > ci0 else '降'}"
+                               + ("；活动指数贴着 0，随时会变" if near else ""))}
     g_txt = ("略" if near else "") + ("高于正常" if v > 0 else "低于正常")
     stage_line = {"字": f"阶段：{ph}（增长{g_txt}、通胀在{'升' if ci > ci0 else '降'}）；历史上这个阶段{stage_view(now_cell, True)}",
-                  "依据": flip_text(ph)}
+                  "依据": flip_text(ph) + (f"；{gap_why}" if gap_why else "")}
 
     # ── 报警信号（每天更新）──
     ends = month_ends(today, K.TREND_MONTHS)
@@ -323,7 +334,7 @@ def build():
                  "表头依据": "每一行：这个信号出现后，历史上真的发生的比例（发生概率）；和平时（不看信号）的比例对照，看是不是明显更常发生",
                  "行": rows, "怎么读": how, "历史更新": K.HIST_YEARLY},
         "数据截至": today.isoformat(),
-        "最新数据": f"阶段 {ym_date(kcf).month}月 · {updates('cfnai')}；利率差{updates('t10y3m')}",
+        "最新数据": f"阶段 {ym_date(kst).month}月{gap} · {updates('cfnai')}；利率差{updates('t10y3m')}",
     }
     detail = {"全部判断": judged, "行键": [r[0] for r in rows_spec],
               "阶段各口径": {str(lag): r for lag, r in runs.items()},

@@ -21,7 +21,7 @@ from collections import defaultdict
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from fetch import coinbase_close, parse, treasury_rates  # noqa: E402
+from fetch import coinbase_close, parse, short_reason, treasury_rates  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "results" / "crosscheck.json"
@@ -52,7 +52,9 @@ def check_crypto(asset, product, first_year):
     for y in range(first_year, today.year):
         d = dt.date(y, 12, 31)
         a, b = cm.get(d), coinbase_close(product, d)
-        if a is None or b is None:
+        if b is None:
+            raise RuntimeError(f"Coinbase 这次没给 {d} 的收盘价")
+        if a is None:
             rows[str(y)] = "缺数据"
             ok = False
             continue
@@ -84,7 +86,7 @@ def check_btc_turns():
     import json as _j
     p = ROOT / "results" / "board1.json"
     if not p.exists():
-        return {"项目": "比特币顶底价", "通过": False, "明细": "图一还没算"}
+        raise RuntimeError("四年周期还没算出来，没有顶底可核")
     clock = _j.loads(p.read_text())["明细"]["加密时钟"]["比特币"]
     pts = [(x["顶日"], x["顶价"]) for x in clock["周期顶"]] + [(x["底日"], x["底价"]) for x in clock["周期底"]]
     rows, ok = {}, True
@@ -94,9 +96,7 @@ def check_btc_turns():
             continue
         b = coinbase_close("BTC-USD", day)
         if b is None:
-            rows[d] = "缺数据"
-            ok = False
-            continue
+            raise RuntimeError(f"Coinbase 这次没给 {d} 的收盘价")
         rows[d] = {"币量": round(v, 2), "Coinbase": round(b, 2), "差": round(v / b - 1, 4)}
         ok = ok and abs(v / b - 1) <= CRYPTO_TOL
     return {"项目": "比特币顶底价", "通过": ok and len(rows) >= 4, "明细": rows}
@@ -179,10 +179,23 @@ def check_policy():
             "通过": share >= 0.99 and not recent_out, "明细": out[-20:]}
 
 
+CHECKS = (("标普月均价", check_sp), ("btc 年末价", lambda: check_crypto("btc", "BTC-USD", 2015)),
+          ("eth 年末价", lambda: check_crypto("eth", "ETH-USD", 2016)), ("比特币顶底价", check_btc_turns),
+          ("金价月均", check_gold), ("油价月均", check_oil), ("信用利差月均", check_spread), ("十年期国债利率", check_10y),
+          ("长短利率差", check_10y3m), ("政策利率", check_policy))
+
+
 def run():
-    res = [check_sp(), check_crypto("btc", "BTC-USD", 2015), check_crypto("eth", "ETH-USD", 2016),
-           check_btc_turns(), check_gold(), check_oil(), check_spread(), check_10y(), check_10y3m(), check_policy(),
-           {"项目": "纳指", "通过": True, "说明": "单一官方来源（纳斯达克经美联储数据库发布），无第二来源"},
+    """每一项单独核：一项核不了（对方网站连不上、没给数、我们这条数据这次没下载到）只记这一项「没核成」，
+    通过＝None，菜单橙色提示；只有真核了、对不上（通过＝False）才报红。11-25 前任何一项出错，所有核对结果都不更新。"""
+    res = []
+    for name, fn in CHECKS:
+        try:
+            res.append(fn())
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠︎ 第二来源核对「{name}」这次没核成：{e!r}")
+            res.append({"项目": name, "通过": None, "没核成": short_reason(e)})
+    res += [{"项目": "纳指", "通过": True, "说明": "单一官方来源（纳斯达克经美联储数据库发布），无第二来源"},
            {"项目": "衰退月份、萨姆规则", "通过": True, "说明": "美国经济研究局认定 / 美联储数据库发布，各只有一家权威来源"},
            {"项目": "全国活动指数", "通过": True, "说明": "芝加哥联储编制、美联储数据库转载，只有一家权威来源"},
            {"项目": "金融状况指数", "通过": True, "说明": "芝加哥联储编制、美联储数据库转载，只有一家权威来源"},

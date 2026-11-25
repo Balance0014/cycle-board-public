@@ -3,6 +3,12 @@ name: 每日更新看板
 # 公开版默认不自动跑。需要每天更新时，再取消下面 schedule 的注释。
 # 定时：世界时 23:17 = 北京时间 7:17（美股收盘、币价日线都已出）。
 on:
+  # 公开版默认不自动跑（见 AGENTS.md）。要每天更新时，取消下面三行的注释。
+  # 定的是世界时 23:17、5:17（北京时间 7:17、13:17）。GitHub 定时常晚几个小时、偶尔整班不跑，第二班是备份；
+  # 两班都没成功、过 2 天，菜单报红。
+  # schedule:
+  #   - cron: "17 23 * * *"
+  #   - cron: "17 5 * * *"
   workflow_dispatch:
   # schedule:
   #   - cron: "17 23 * * *"
@@ -15,24 +21,45 @@ concurrency: daily-update
 jobs:
   update:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 平时 2 分钟跑完。下载有总时限（fetch.BUDGET 8 分钟），一个网站卡住也到不了这个上限（11-25 前是 20 分钟、下载不限时）
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - name: 安装依赖
+        id: deps
         run: pip install -q -r requirements.txt
       - name: 安装中文字体
+        id: fonts
         run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
       - name: 下载、第二来源核对、计算、复核对比、出图、验收
+        id: run
         run: python -I pipeline/run_all.py
       - name: 有变化才提交（验收不过走不到这一步）
+        id: push
         run: |
           git config user.name "cycle-board-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A data/sources.json results 看板 改动记录.md
           if git diff --cached --quiet; then echo "无变化"; exit 0; fi
-          ASOF=$(python -c 'import json;print(json.load(open("results/board1.json"))["显示"]["数据截至"])')
+          ASOF=$(python -c 'import json;print(json.load(open("results/board1.json"))["显示"]["数据截至"])' 2>/dev/null || echo 不详)
           git commit -q -m "每日更新：数据截至 $ASOF"
+          git pull -q --rebase   # 跑的这两分钟里有人推了程序改动，先接上再推，免得推不上去整班白跑
+          git push
+      # 11-25 加：整班没跑成（共用检查不过、装不上依赖、超时等），在上一次发布的状态文件里记一笔，菜单下次同步就橙色提示，
+      # 不用等 2 天变红。跑了一半的东西全丢掉，只提交这一笔；下一班跑成功会整份重写状态文件，这一笔自动消失
+      - name: 这一班没跑成：记进状态文件
+        if: failure() || cancelled()
+        env:
+          STEPS: ${{ toJSON(steps) }}
+        run: |
+          git fetch -q origin main && git reset -q --hard origin/main && git clean -fdq -- results 看板
+          STEP=$(python3 -c 'import json,os;s=json.loads(os.environ["STEPS"]);n={"deps":"安装依赖","fonts":"安装中文字体","run":"计算、出图、验收","push":"提交推送"};print(next((v for k,v in n.items() if s.get(k,{}).get("outcome")=="failure"),"超时或被取消"))')
+          python3 -I pipeline/mark_failed.py "$STEP"
+          git config user.name "cycle-board-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add 看板/状态.json
+          git commit -q -m "云端这一班没跑成：$STEP"
           git push

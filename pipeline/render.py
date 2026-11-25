@@ -393,13 +393,20 @@ document.body.appendChild(o)})</script>"""
 def measure(body, name=""):
     """按实际内容量出图的高度（不手填，内容多了也不会被截掉），并量出每块悬停说明的位置（单位＝菜单里的点）。"""
     probe = page(2000, body).replace("</body>", PROBE + "</body>")
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "m.html"
-        src.write_text(probe, encoding="utf-8")
-        r = subprocess.run([chrome(), "--headless=new", f"--user-data-dir={tmp}/prof", "--disable-gpu", "--no-sandbox",
-                            f"--window-size={W},2000", "--virtual-time-budget=3000", "--dump-dom", src.as_uri()],
-                           capture_output=True, text=True, timeout=120)
-    m = re.search(r'<pre id="probe">(.*?)</pre>', r.stdout, re.S)
+    m = None
+    for _ in range(2):   # 浏览器偶尔抽风一次（11-25 审查实测出过），再试一次；两次都不行这个题目才回到上一版
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "m.html"
+            src.write_text(probe, encoding="utf-8")
+            try:
+                r = subprocess.run([chrome(), "--headless=new", f"--user-data-dir={tmp}/prof", "--disable-gpu", "--no-sandbox",
+                                    f"--window-size={W},2000", "--virtual-time-budget=3000", "--dump-dom", src.as_uri()],
+                                   capture_output=True, text=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                continue
+        m = re.search(r'<pre id="probe">(.*?)</pre>', r.stdout, re.S)
+        if m:
+            break
     if not m:
         raise RuntimeError("量不出图的高度")
     got = json.loads(html.unescape(m.group(1)))
@@ -413,16 +420,21 @@ def measure(body, name=""):
 
 
 def shoot(html_text, h, out_png: Path):
-    with tempfile.TemporaryDirectory() as tmp:
-        src = Path(tmp) / "p.html"
-        src.write_text(html_text, encoding="utf-8")
-        shot = Path(tmp) / "out.png"
-        subprocess.run([chrome(), "--headless=new", f"--user-data-dir={tmp}/prof", "--disable-gpu", "--no-sandbox",
-                        "--hide-scrollbars", "--force-device-scale-factor=3", f"--window-size={W},{h}",
-                        f"--screenshot={shot}", src.as_uri()], capture_output=True, timeout=120)
-        if not shot.exists() or shot.stat().st_size < 10_000:
-            raise RuntimeError(f"出图失败：{out_png.name}")
-        shutil.move(str(shot), out_png)
+    for _ in range(2):   # 浏览器偶尔抽风一次，再试一次
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "p.html"
+            src.write_text(html_text, encoding="utf-8")
+            shot = Path(tmp) / "out.png"
+            try:
+                subprocess.run([chrome(), "--headless=new", f"--user-data-dir={tmp}/prof", "--disable-gpu", "--no-sandbox",
+                                "--hide-scrollbars", "--force-device-scale-factor=3", f"--window-size={W},{h}",
+                                f"--screenshot={shot}", src.as_uri()], capture_output=True, timeout=120)
+            except subprocess.TimeoutExpired:
+                continue
+            if shot.exists() and shot.stat().st_size >= 10_000:
+                shutil.move(str(shot), out_png)
+                return
+    raise RuntimeError(f"出图失败：{out_png.name}")
 
 
 def find_alarms(x):
@@ -485,71 +497,101 @@ PAGES = {"board0": pages_board0, "board1": pages_board1, "board2": pages_board2,
          "board5": pages_board5, "board6": pages_board6, "board7": pages_board7, "xen": pages_xen}
 
 
-def run():
+def run(broken: dict = None):
+    """出图并（云端）写状态文件。broken：这一班回到上一版的题目（run_all 传进来）；某个题目出图出错也记进去，
+    这个题目这一轮不写图，run_all 让它回到上一版再出一轮。"""
+    broken = {} if broken is None else broken
     review = json.loads((ROOT / "results" / "review.json").read_text())
-    cross = json.loads((ROOT / "results" / "crosscheck.json").read_text())
+    try:
+        cross = json.loads((ROOT / "results" / "crosscheck.json").read_text())
+    except (OSError, ValueError) as e:   # 核对结果读不出：当作这次没核成，不拖垮出图
+        cross = []
+        broken.setdefault("crosscheck", fetch.short_reason(e))
     BUILD.mkdir(exist_ok=True)
     for f in [*BUILD.glob("*.html"), *BUILD.glob("*.json")]:
         f.unlink()
     hashes = json.loads(HASHES.read_text()) if HASHES.exists() else {}
     made, asofs, alarms, pinned, latest = [], [], [], [], {}
     for t in TOPICS:
-        data = json.loads((ROOT / "results" / f"{t['键']}.json").read_text())["显示"]
-        if t.get("置顶"):   # 项目类有自己的断更判断（菜单程序看这两个日期），不拉低周期题目的「数据截至」
-            pinned.append({"目录": t["目录"], "网站截至": data["网站截至"], "最近成功": data["最近成功"],
-                           "失败": data["失败"]})
-        elif data["数据截至"]:   # 只有月度和每周数据的题目（原油）不拉低「数据截至」，断更由验收的新鲜度检查拦
-            asofs.append(data["数据截至"])
-        # 菜单最上面的报警：每个响了报警的题目一条——报警字（信号卡自带，直接拼名字和状态会读成「比200周均线低于均线」）
-        # + 那一页「对现在」的结论（2026-11-19「结论是啥」：菜单里直接写结论，不让人再点进去找）
-        for pg in (v for v in data.values() if isinstance(v, dict)):
-            hit = list(find_alarms(pg))
-            if hit and "对现在" in pg:
-                alarms.append({"报警": "；".join(s["报警字"] for s in hit),
-                               "结论": pg["对现在"]["字"].removeprefix("对现在：")})
-                break
-        if t["目录"] and not t.get("置顶"):   # 菜单里每个题目第一行：最新数据到哪天
-            latest[t["目录"]] = data.get("最新数据") or data["数据截至"]
-        pending = sum(1 for c in review["变动"] if c["图"] == t["名"])
-        board_dir = (ROOT / "看板" if IN_CLOUD else BUILD / "预览") / t["目录"]
-        board_dir.mkdir(parents=True, exist_ok=True)
-        pages = {}
-        for name, body in PAGES[t["键"]](data, pending).items():
-            body += sources(t["键"])
-            h, tips = measure(body, name)
-            pages[name] = (h, page(h, body), tips)
-        for name, (h, text, tips) in pages.items():
-            key = f"{t['目录']}/{name}"
-            stem = name.removesuffix(".png")
-            (BUILD / f"{t['键']}__{stem}.html").write_text(text, encoding="utf-8")
-            # 悬停说明和图放在一起（同名 .json），菜单程序读它；内容不变时写出来也一样，不会多出提交
-            tip_json = json.dumps({"宽": W, "高": h, "浮现": tips}, ensure_ascii=False, indent=1) + "\n"
-            (BUILD / f"{t['键']}__{stem}.json").write_text(tip_json, encoding="utf-8")
-            (board_dir / f"{stem}.json").write_text(tip_json, encoding="utf-8")
-            digest = hashlib.sha256(text.encode()).hexdigest()
-            if IN_CLOUD and hashes.get(key) == digest and (board_dir / name).exists():
-                continue
-            shoot(text, h, board_dir / name)
-            if IN_CLOUD:
-                hashes[key] = digest
-        stems = {n.removesuffix(".png") for n in pages}
-        for f in [*board_dir.glob("*.png"), *board_dir.glob("*.json")]:   # 清掉过期的图和说明（比如年份变了）
-            if f.stem not in stems and f.name != STATUS.name:   # 共振总表放在根目录，和状态文件同一层，状态文件别删
-                f.unlink()
-                hashes.pop(f"{t['目录']}/{f.name}", None)
-        made += [f"{t['目录']}/{n}".lstrip("/") for n in pages]
+        try:
+            made += _topic(t, review, hashes, asofs, alarms, pinned, latest)
+        except Exception as e:  # noqa: BLE001  一个题目出图出错（比如字多了超高）只影响它自己
+            broken[t["键"]] = fetch.short_reason(e)
+            print(f"⚠︎ {t['名']} 出图出错：{e!r}")
     if not IN_CLOUD:
         return made
     HASHES.write_text(json.dumps(hashes, ensure_ascii=False, indent=1))
-    ok = all(c["通过"] for c in cross)
-    # 数据截至取所有题目里最旧的那个：哪个题目断了更新，菜单栏都会报警
+    # 只有真核了、对不上（通过＝False）才算不通过、报红；核不了的（没核成）进「数据问题」，橙色
+    ok = not any(c.get("通过") is False for c in cross)
+    unchecked = [{"名": f"第二来源核对「{c['项目']}」", "问题": f"这次没核成：{c['没核成']}"} for c in cross if c.get("没核成")]
     now = dt.datetime.now(dt.timezone(dt.timedelta(hours=8)))   # 北京时间，菜单里写「几月几日几点更新」
-    STATUS.write_text(json.dumps({"数据截至": min(asofs), "第二来源核对通过": ok, "待复核": review["待复核数"],
+    STATUS.write_text(json.dumps({"数据截至": min(asofs) if asofs else "", "第二来源核对通过": ok, "待复核": review["待复核数"],
                                   "更新": now.strftime("%Y-%m-%d %H:%M"), "最新数据": latest,
+                                  "出错": broken_list(broken, now.date()), "数据问题": fetch.problems() + unchecked,
                                   "信号报警": alarms, "置顶": pinned, "数据清单": fetch.data_list(),
                                   "题目顺序": [t["目录"] for t in TOPICS if not t.get("置顶") and t["目录"]]},
                                  ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
     return made
+
+
+def broken_list(broken: dict, today: dt.date) -> list:
+    """状态文件「出错」：哪个题目回到了上一版、为什么、从哪天起（接着上一份状态文件算，连着坏几天看得出来）。"""
+    prev = {}
+    if STATUS.exists():
+        try:
+            prev = {x["题目"]: x["起"] for x in json.loads(STATUS.read_text()).get("出错", [])}
+        except (ValueError, KeyError, TypeError):
+            prev = {}
+    names = {t["键"]: t["名"] for t in TOPICS} | {"crosscheck": "第二来源核对", "review": "复核对比"}
+    return [{"题目": names.get(k, k), "原因": v, "起": prev.get(names.get(k, k), today.isoformat())} for k, v in broken.items()]
+
+
+def _topic(t, review, hashes, asofs, alarms, pinned, latest) -> list:
+    """一个题目：读结果、量高度、出图、写悬停说明，顺带收集状态文件要的东西。"""
+    data = json.loads((ROOT / "results" / f"{t['键']}.json").read_text())["显示"]
+    if t.get("置顶"):   # 项目类有自己的断更判断（菜单程序看这两个日期），不拉低周期题目的「数据截至」
+        pinned.append({"目录": t["目录"], "网站截至": data["网站截至"], "最近成功": data["最近成功"],
+                       "失败": data["失败"]})
+    elif data["数据截至"]:   # 只有月度和每周数据的题目（原油）不拉低「数据截至」，断更由验收的新鲜度检查拦
+        asofs.append(data["数据截至"])
+    # 菜单最上面的报警：每个响了报警的题目一条——报警字（信号卡自带，直接拼名字和状态会读成「比200周均线低于均线」）
+    # + 那一页「对现在」的结论（2026-11-19「结论是啥」：菜单里直接写结论，不让人再点进去找）
+    for pg in (v for v in data.values() if isinstance(v, dict)):
+        hit = list(find_alarms(pg))
+        if hit and "对现在" in pg:
+            alarms.append({"报警": "；".join(s["报警字"] for s in hit),
+                           "结论": pg["对现在"]["字"].removeprefix("对现在：")})
+            break
+    if t["目录"] and not t.get("置顶"):   # 菜单里每个题目第一行：最新数据到哪天
+        latest[t["目录"]] = data.get("最新数据") or data["数据截至"]
+    pending = sum(1 for c in review["变动"] if c["图"] == t["名"])
+    board_dir = (ROOT / "看板" if IN_CLOUD else BUILD / "预览") / t["目录"]
+    board_dir.mkdir(parents=True, exist_ok=True)
+    pages = {}
+    for name, body in PAGES[t["键"]](data, pending).items():
+        body += sources(t["键"])
+        h, tips = measure(body, name)
+        pages[name] = (h, page(h, body), tips)
+    for name, (h, text, tips) in pages.items():
+        key = f"{t['目录']}/{name}"
+        stem = name.removesuffix(".png")
+        (BUILD / f"{t['键']}__{stem}.html").write_text(text, encoding="utf-8")
+        # 悬停说明和图放在一起（同名 .json），菜单程序读它；内容不变时写出来也一样，不会多出提交
+        tip_json = json.dumps({"宽": W, "高": h, "浮现": tips}, ensure_ascii=False, indent=1) + "\n"
+        (BUILD / f"{t['键']}__{stem}.json").write_text(tip_json, encoding="utf-8")
+        (board_dir / f"{stem}.json").write_text(tip_json, encoding="utf-8")
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        if IN_CLOUD and hashes.get(key) == digest and (board_dir / name).exists():
+            continue
+        shoot(text, h, board_dir / name)
+        if IN_CLOUD:
+            hashes[key] = digest
+    stems = {n.removesuffix(".png") for n in pages}
+    for f in [*board_dir.glob("*.png"), *board_dir.glob("*.json")]:   # 清掉过期的图和说明（比如年份变了）
+        if f.stem not in stems and f.name != STATUS.name:   # 共振总表放在根目录，和状态文件同一层，状态文件别删
+            f.unlink()
+            hashes.pop(f"{t['目录']}/{f.name}", None)
+    return [f"{t['目录']}/{n}".lstrip("/") for n in pages]
 
 
 if __name__ == "__main__":

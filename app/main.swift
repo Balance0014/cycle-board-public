@@ -6,14 +6,22 @@ import Cocoa
 // 图上的格子、表头、时间点：鼠标停上去浮出依据（说明来自图旁边的同名 .json）。
 // 置顶项目（状态文件「置顶」，如 XEN 流通进度）画在第一层最上面、和图 N 分开；「看板」根目录下的图（以后的共振总表）紧接其后。
 // 每 30 分钟在后台从 GitHub 拉一次最新图，拉完自己检查健康：
-//   数据超过 STALE_DAYS 天没更新（云端停了、验收不过、本机同步不了，最后都表现为这个）、
-//   第二来源对不上、有结论变了还没复核 —— 菜单栏上的图标直接变色加 ⚠︎，不用点开就能看到。
+//   红：自动更新超过 FAIL_DAYS 天没成功（云端停了、整次验收不过、本机同步不了，最后都表现为「更新」时间变旧）、
+//       某个题目连着 FAIL_DAYS 天回到上一版（11-25 加：原来一个题目坏几个星期也只是橙）、第二来源真核了对不上；
+//   橙：某个题目这一班回到了上一版（状态文件「出错」：算不出 / 出不了图 / 它自己的验收不过，别的题目照常更新）、
+//       某条数据按它自己的公布节奏停太久或这次没下载到（「数据问题」）、有结论变了还没复核；
+//       云端某一班没跑成（状态文件「云端失败」，云端失败时自己记的；11-25 加，不用等 2 天变红才知道）、
+//       本机超过一天同步不下来（网络或 GitHub 登录过期；红的时候也写明是本机的问题，不误说成云端没更新）；
+//   都会加 ⚠︎，不用点开就能看到；点开逐条写明是哪个题目、哪条数据、从哪天起。
+//   11-24 前红色看的是「所有题目里最旧的数据日期超过 4 天」：实际利率周五的数下周一才贴出来，周末一过就误报红；
+//   一个题目崩了整个看板都不更新。现在按每条数据自己的节奏判断（pipeline/fetch.py MAX_AGE），坏一处只标一处。
 //   某个题目的报警信号触发了（比如利率曲线倒挂）：图标变橙、不加 ⚠︎，下拉最上面列出报警和结论；报警解除后下一次同步自动变回。
 // 按钮只放一个图标（2026-11-18：菜单栏放不下，图标被刘海挡住；原「美国四年周期」约 100 点宽，
 // 改成「看板」两字 48 点仍挤到微信，再改成图标）。TITLE 是图标读不出来时的备用字，也是读屏名
 let ICON = "chart.line.uptrend.xyaxis"
 let TITLE = "看板"
-let STALE_DAYS = 4          // 正常是 1–2 天；云端连续两天没成功才报警，偶尔一次网络失败不吓人
+let FAIL_DAYS = 2           // 「更新」（最后一次成功发布）超过 2 天才报红：云端每天两班，GitHub 定时经常晚几个小时；
+                            // 超过 2 天＝至少整整一天两班都没跑成，偶尔一班失败不报
 // 置顶项目（XEN 流通进度，2026-11-18：项目放最上面，和周期模型图 N 分开）。云端每天查一次，有自己的断更报警：
 //   当天没取到能用的数 → 橙；连续两班都没取到（最近成功已过 PIN_FAIL_DAYS 天）→ 红；
 //   网站超过 PIN_SITE_DAYS 天没重算未来释放曲线 → 橙（平时 2–6 天一次；它的卡片每小时刷新，标的「更新时间」只是曲线重算时间）。
@@ -153,6 +161,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var board: URL { repo.appendingPathComponent("看板") }
     private var lastSync = Date.distantPast
     private var syncNote = "尚未同步"
+    private var syncFailed = false
+    private var syncProc: Process?
+    private let SYNC_OK_KEY = "上次同步成功"   // 记在本机偏好里，程序重开也知道本机多久没同步下来了
     private var timer: Timer?
     private let tipCloser = TipCloser()
 
@@ -166,7 +177,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         item.menu = menu
         refreshTitle()
         sync(force: true)
-        timer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in self?.sync(force: true) }
+        // 每 30 分钟：先按今天的日期重新判断颜色（不等同步结束；11-25 查出同步卡住时图标颜色一直不变），再同步
+        timer = Timer.scheduledTimer(withTimeInterval: 1800, repeats: true) { [weak self] _ in
+            self?.refreshTitle()
+            self?.sync(force: true)
+        }
     }
 
     // ── 健康检查：只看程序写的状态文件和今天的日期，不靠任何外部服务 ──
@@ -236,33 +251,86 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func boardHealth() -> Health {
         guard let data = try? Data(contentsOf: board.appendingPathComponent("状态.json")),
-              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let asofText = j["数据截至"] as? String else {
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return Health(lines: ["⚠︎ 读不到状态，先别按图操作", "跟维护助手说「看板坏了」"], level: 2)
         }
-        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "UTC")
-        let asof = f.date(from: asofText) ?? .distantPast
-        let age = Int(Date().timeIntervalSince(asof) / 86400)
-        let m = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(identifier: "UTC")!, from: asof)
-        let asofCN = "\(m.month ?? 0)月\(m.day ?? 0)日"
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm"; f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        let updated = (j["更新"] as? String).flatMap { f.date(from: $0) } ?? .distantPast
+        let age = Int(Date().timeIntervalSince(updated) / 86400)
         let crossOK = (j["第二来源核对通过"] as? Bool) ?? false
         let pending = (j["待复核"] as? Int) ?? 0
         var bad: [String] = []
-        if age >= STALE_DAYS { bad.append("⚠︎ 已 \(age) 天没更新（数据停在 \(asofCN)），图上的数可能过时") }
-        if !crossOK { bad.append("⚠︎ 两个数据来源对不上，先别按图操作") }
-        if !bad.isEmpty {
-            return Health(lines: bad + ["跟维护助手说「看板没更新」，会查清是哪一环断了"], level: 2)
+        let local = localSyncProblem()
+        if age >= FAIL_DAYS {
+            if let l = local {
+                bad.append("⚠︎ \(l)，看到的还是 \((updatedText(j) ?? "之前").replacingOccurrences(of: " 更新", with: "")) 的图")
+            } else {
+                bad.append("⚠︎ 自动更新已 \(age) 天没成功（最后一次：\(updatedText(j) ?? "不详")），图上的数可能过时")
+            }
         }
+        if !crossOK { bad.append("⚠︎ 两个数据来源对不上，先别按图操作") }
         let alarms = ((j["信号报警"] as? [[String: Any]]) ?? []).compactMap { a -> Alarm? in
             guard let t = a["报警"] as? String else { return nil }
             return Alarm(title: t, text: (a["结论"] as? String) ?? "")
         }
-        if pending > 0 {
-            return Health(lines: ["⚠︎ 有 \(pending) 处结论变了还没复核，先别当真", "跟维护助手说「复核看板」"],
-                          level: 1, signals: alarms)
+        // 橙：坏一处只标一处，逐条写明（别的题目照常更新）
+        var warn: [String] = []
+        if let c = j["云端失败"] as? [String: Any] {
+            let n = (c["次数"] as? Int) ?? 1, step = (c["环节"] as? String) ?? "不详"
+            let when = updatedText(["更新": c["时间"] ?? ""])?.replacingOccurrences(of: " 更新", with: "") ?? "最近"
+            warn.append(n > 1 ? "⚠︎ 云端已连着 \(n) 班没跑成（最近 \(when)，卡在：\(step)），图还是上一次的"
+                              : "⚠︎ 云端 \(when) 那一班没跑成（卡在：\(step)），图还是上一次的")
+        }
+        if age < FAIL_DAYS, let l = local { warn.append("⚠︎ \(l)") }
+        for x in (j["出错"] as? [[String: Any]]) ?? [] {
+            let name = (x["题目"] as? String) ?? "有个题目", why = (x["原因"] as? String) ?? ""
+            let since = cnDay(x["起"] as? String), days = daysSince(x["起"] as? String)
+            if days >= FAIL_DAYS {
+                bad.append("⚠︎ \(name) 已 \(days) 天没更新（\(why)），图还是 \(since) 之前的")
+            } else {
+                warn.append("⚠︎ \(name) 从 \(since) 起没更新（\(why)），图还是之前的")
+            }
+        }
+        for x in (j["数据问题"] as? [[String: Any]]) ?? [] {
+            warn.append("⚠︎ \((x["名"] as? String) ?? "有条数据")：\((x["问题"] as? String) ?? "")")
+        }
+        if pending > 0 { warn.append("⚠︎ 有 \(pending) 处结论变了还没复核，先别当真") }
+        if !bad.isEmpty {
+            let more = warn.count > 3 ? Array(warn.prefix(2)) + ["…另有 \(warn.count - 2) 条"] : warn
+            let ask = local != nil && age >= FAIL_DAYS ? "跟维护助手说「看板同步不下来」，照维护手册查"
+                                                      : "跟维护助手说「看板报红」，照维护手册查"
+            return Health(lines: bad + more + [ask], level: 2, signals: alarms)
+        }
+        if !warn.isEmpty {
+            let shown = warn.count > 4 ? Array(warn.prefix(3)) + ["…另有 \(warn.count - 3) 条"] : warn
+            let ask = warn.count == 1 && pending > 0 ? "跟维护助手说「复核看板」" : "跟维护助手说「看板有橙色提示」，照维护手册查"
+            return Health(lines: [updatedText(j) ?? ""].filter { !$0.isEmpty } + shown + [ask], level: 1, signals: alarms)
         }
         // 一切正常时只写一行更新时间（2026-11-19：「两个来源核对一致 · 结论已认可 · 已同步」这种是给维护的人看的，不是给用户看的）
-        return Health(lines: [updatedText(j) ?? "数据到 \(asofCN)"], level: 0, signals: alarms)
+        return Health(lines: [updatedText(j) ?? "已更新"], level: 0, signals: alarms)
+    }
+
+    // 某天（状态文件里的北京日期）到今天过了几天；读不出算 0
+    private func daysSince(_ s: String?) -> Int {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        guard let s = s, let d = f.date(from: String(s.prefix(10))) else { return 0 }
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return cal.dateComponents([.day], from: cal.startOfDay(for: d), to: cal.startOfDay(for: Date())).day ?? 0
+    }
+
+    // 本机同步不下来超过一天：网络不通，或 GitHub 登录过期（副本靠 gh 的登录拉取）。正常返回 nil
+    private func localSyncProblem() -> String? {
+        guard syncFailed, let ok = UserDefaults.standard.object(forKey: SYNC_OK_KEY) as? Date else { return nil }
+        let h = Int(Date().timeIntervalSince(ok) / 3600)
+        guard h >= 24 else { return nil }
+        return "本机已 \(h / 24) 天没同步下来（网络不通或 GitHub 登录过期）"
+    }
+
+    private func cnDay(_ s: String?) -> String {
+        let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.timeZone = TimeZone(identifier: "Asia/Shanghai")
+        guard let s = s, let d = f.date(from: String(s.prefix(10))) else { return "最近" }
+        let c = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(identifier: "Asia/Shanghai")!, from: d)
+        return "\(c.month ?? 0)月\(c.day ?? 0)日"
     }
 
     // 「11月19日 7:20 更新」：云端最后一次跑成功的时间（北京时间，状态文件「更新」）
@@ -351,20 +419,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func sync(force: Bool = false) {
         guard force || Date().timeIntervalSince(lastSync) > 1800 else { return }
         lastSync = Date()
+        if let old = syncProc, old.isRunning { old.terminate() }   // 上一次卡住了：掐掉重来
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/sh")
-        p.arguments = ["-c", "git fetch --quiet origin main && git reset --quiet --hard origin/main"]
+        // 11-25 补：断电或被掐掉留下的锁文件（5 分钟以上没人用的）先清掉，不然以后每次都同步失败、要人手修；
+        // 拉取限速：连续 30 秒平均每秒不到 1KB 算卡住、放弃这次（原来网络半死不活时会一直挂着）
+        p.arguments = ["-c", "find .git -maxdepth 4 -name '*.lock' -mmin +5 -delete 2>/dev/null; "
+                       + "git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=30 fetch --quiet origin main "
+                       + "&& git reset --quiet --hard origin/main"]
         p.currentDirectoryURL = repo
         p.environment = ["PATH": "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin", "HOME": NSHomeDirectory()]
         p.terminationHandler = { [weak self] proc in
-            let f = DateFormatter(); f.dateFormat = "HH:mm"
+            let f = DateFormatter(); f.dateFormat = "HH:mm"; f.timeZone = TimeZone(identifier: "Asia/Shanghai")   // 菜单里的时间都按北京时间
             let t = f.string(from: Date())
+            let ok = proc.terminationStatus == 0
             DispatchQueue.main.async {
-                self?.syncNote = proc.terminationStatus == 0 ? "\(t) 已同步" : "\(t) 同步失败，显示本地版"
-                self?.refreshTitle()
+                guard let self = self else { return }
+                self.syncFailed = !ok
+                if ok || UserDefaults.standard.object(forKey: self.SYNC_OK_KEY) == nil {
+                    UserDefaults.standard.set(ok ? Date() : Date().addingTimeInterval(-60), forKey: self.SYNC_OK_KEY)
+                }
+                self.syncNote = ok ? "\(t) 已同步" : "\(t) 同步失败，显示本地版"
+                self.refreshTitle()
             }
         }
-        try? p.run()
+        syncProc = p
+        do { try p.run() } catch {
+            syncFailed = true
+            syncNote = "同步启动不了，显示本地版"
+            refreshTitle()
+        }
     }
 
     private func pngs(in dir: URL) -> [URL] {

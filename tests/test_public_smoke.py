@@ -36,10 +36,18 @@ def check(name, ok, detail=""):
         raise SystemExit(1)
 
 
+def shipped(rel):
+    """Is this path part of the published tree? In a git clone ask git (a user's own data/raw from an
+    online run is fine as long as it is not committed); in an exported archive, check the disk."""
+    if (ROOT / ".git").exists():
+        r = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--", rel], capture_output=True, text=True)
+        return bool(r.stdout.strip())
+    return (ROOT / rel).exists()
+
+
 def test_layout():
-    check("no git dir", not (ROOT / ".git").exists())
-    check("xen snapshot absent", not (ROOT / "data" / "xen_state.json").exists())
-    check("raw vendor dir absent", not (ROOT / "data" / "raw").exists())
+    check("xen snapshot not shipped", not shipped("data/xen_state.json"))
+    check("raw vendor files not shipped", not shipped("data/raw"))
     check("sources registry present", (ROOT / "data" / "sources.json").is_file())
     check("charts present", len(list((ROOT / "看板").rglob("*.png"))) == 15)
     yml = (ROOT / ".github" / "workflows" / "daily.yml").read_text(encoding="utf-8")
@@ -140,7 +148,7 @@ def test_text_hygiene():
     for path in ROOT.rglob("*"):
         if not path.is_file() or path.suffix not in TEXT_EXT:
             continue
-        if any(part in {".venv", "__pycache__", "build"} for part in path.parts):
+        if any(part in {".venv", "__pycache__", "build", ".git"} for part in path.parts) or "data/raw" in path.as_posix():
             continue
         files += 1
         text = path.read_text(encoding="utf-8", errors="ignore")

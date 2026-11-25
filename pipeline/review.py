@@ -20,7 +20,9 @@ OUT = RES / "review.json"
 LOG = ROOT / "改动记录.md"
 # 不算结论变动的：每天都会变的日期；时间线色块的位置（只是画图用的比例，日期本身在「字」里，变了照样会查出来）；
 # 「现在」「信号」是每天跟着数据走的实时状态，不是结论，不用认可（信号报警另有菜单栏提醒）
-IGNORE = {"数据截至", "最新数据", "起", "止", "现在", "信号", "对现在"}   # 「对现在」由已认可的结论加实时报警拼成，跟着日子走；「最新数据」是菜单里写的数据日期
+IGNORE = {"数据截至", "最新数据", "起", "止", "现在", "信号", "对现在", "总表句"}   # 「对现在」由已认可的结论加实时报警拼成，跟着日子走；「最新数据」是菜单里写的数据日期
+# 「总表句」＝现在处在哪个阶段（共振总表顶上那行），每月跟着数据变，和「现在」一样是实时状态；不放进来，每次换阶段或缺月
+# 都会挂「待复核」，没人维护时菜单就一直橙（11-24 查出）。历史统计、判断词照样要认可
 SHOWN = {"字", "数", "结论", "名", "标题", "周期", "之后", "平时", "判断"}   # 写进改动记录的字段（颜色、开关这类跟着字变，不重复记）
 
 
@@ -53,11 +55,15 @@ def diff():
             continue
         if not t["目录"]:   # 共振总表全由各题目已认可的结论加实时信号拼成，不单独复核（各题目的结论变了在各自那里拦）
             continue
-        cur = dict(flatten(json.loads(cur_path(t).read_text())["显示"]))
         if not approved_path(t).exists():
             changes.append({"图": t["名"], "位置": "全部", "原来": None, "现在": "首次生成，尚未认可"})
             continue
-        old = dict(flatten(json.loads(approved_path(t).read_text())))
+        try:
+            cur = dict(flatten(json.loads(cur_path(t).read_text())["显示"]))
+            old = dict(flatten(json.loads(approved_path(t).read_text())))
+        except (OSError, ValueError, KeyError, TypeError) as e:   # 一个题目对比不了：当作有变动、要人看，不拖垮别的题目
+            changes.append({"图": t["名"], "位置": "全部", "原来": None, "现在": f"对比不了：{type(e).__name__}"})
+            continue
         changes += [{"图": t["名"], "位置": k, "原来": old.get(k), "现在": cur.get(k)}
                     for k in sorted(set(cur) | set(old)) if old.get(k) != cur.get(k)]
     OUT.write_text(json.dumps({"待复核数": len(changes), "变动": changes}, ensure_ascii=False, indent=1))
