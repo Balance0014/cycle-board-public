@@ -2,9 +2,9 @@
 
 公开维护身份 / Public identity: [Balance0014](https://github.com/Balance0014) · [X](https://x.com/balance0014)
 
-这是一套可运行的周期统计看板：用公开的宏观、利率、商品和加密货币历史，计算「现在落在哪一格、历史上这种格子之后更常发生什么」，并出中文图。代码、口径、已算好的结论和图都在这个归档里。原始第三方数据文件不在归档里，程序会在你自己运行时去各来源下载。
+这是一套可运行的经济与加密周期统计看板，写给关注宏观和加密市场的人。它用公开的宏观、利率、商品和加密货币历史，计算「现在落在哪一格、历史上这种格子之后更常发生什么」，并出中文图。代码、口径、已算好的结论和图都在这个归档里。原始第三方数据文件不在归档里，程序会在你自己运行时去各来源下载。
 
-This is a working cycle dashboard. It uses public macro, rate, commodity, and crypto history to compute where the present sits in a cycle and what has happened more often after similar episodes, then draws Chinese charts. The code, definitions, calculated results, and charts are in this archive. Vendor data files are not bundled; the program downloads them when you run it.
+This is a working economic and crypto cycle dashboard for people who track macro and crypto markets. It uses public macro, rate, commodity, and crypto history to compute where the present sits in a cycle and what has happened more often after similar episodes, then draws Chinese charts. The code, definitions, calculated results, and charts are in this archive. Vendor data files are not bundled; the program downloads them when you run it.
 
 ## 不是投资建议 / Not investment advice
 
