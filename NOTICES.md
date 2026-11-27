@@ -1,6 +1,8 @@
 # Third-party notices
 
-The MIT license in `LICENSE` applies to the author’s code. These dependencies are not MIT and are not vendored; install them from `requirements.txt`.
+The MIT license in `LICENSE` covers the author’s source code and original documentation only. It does not cover third-party data, third-party libraries, or calculated figures that a data provider’s own terms still restrict; those terms are in `DATA.md` and below.
+
+The dependencies below are not MIT and are not vendored; install them from `requirements.txt`.
 
 ## xlrd 2.0.1
 
