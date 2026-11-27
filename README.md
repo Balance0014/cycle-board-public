@@ -142,9 +142,9 @@ When the menu says to ask the maintainer, match the case above: red (check Actio
 
 ## 工作流默认关闭 / Workflow is off
 
-`.github/workflows/daily.yml` 只有 `workflow_dispatch`。定时任务被注释掉了，fork 之后不会自己每天跑、也不会自己提交。要启用，打开该文件里的 `schedule` 注释（两班，第二班是备份）。整班没跑成时，最后一步在 `看板/状态.json` 记一笔「云端失败」，菜单马上提示。工作流使用仓库自带的 `GITHUB_TOKEN`，文件里没有密钥。
+本仓每天自动更新两班：北京时间 7:17 和 13:17，第二班是备份。由 `.github/workflows/daily.yml` 的 `schedule` 定时触发，也可以手动运行（`workflow_dispatch`）。GitHub 默认不在 fork 里跑定时任务，所以 fork 之后要在 Actions 里手动启用，才会每天跑。整班没跑成时，最后一步在 `看板/状态.json` 记一笔「云端失败」，菜单马上提示。工作流使用仓库自带的 `GITHUB_TOKEN`，文件里没有密钥。
 
-`.github/workflows/daily.yml` is `workflow_dispatch` only. The schedule is commented out, so a fork does not run or commit daily. Uncomment `schedule` to enable it (two slots; the second is a backup). A failed run records 「云端失败」 in `看板/状态.json` so the menu shows it at once. The workflow uses the repository `GITHUB_TOKEN`. No secret is stored in the file.
+This repository updates itself twice a day, at 23:17 and 05:17 UTC (the second run is a backup), from the `schedule` in `.github/workflows/daily.yml`; it can also be run by hand with `workflow_dispatch`. GitHub does not run scheduled workflows in forks by default, so a fork stays manual until you enable Actions there. A failed run records 「云端失败」 in `看板/状态.json` so the menu shows it at once. The workflow uses the repository `GITHUB_TOKEN`. No secret is stored in the file.
 
 ## 口径 / Definitions
 
