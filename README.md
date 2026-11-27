@@ -1,10 +1,10 @@
-# 经济周期结论看板 / Cycle Board
+# Cycle Board: Bitcoin and economic cycle dashboard / 经济周期结论看板
 
 公开维护身份 / Public identity: [Balance0014](https://github.com/Balance0014) · [X](https://x.com/balance0014)
 
 这是一套可运行的经济与加密周期统计看板，写给关注宏观和加密市场的人。它用公开的宏观、利率、商品和加密货币历史，计算「现在落在哪一格、历史上这种格子之后更常发生什么」，并出中文图。代码、口径、已算好的结论和图都在这个归档里。原始第三方数据文件不在归档里，程序会在你自己运行时去各来源下载。
 
-This is a working economic and crypto cycle dashboard for people who track macro and crypto markets. It uses public macro, rate, commodity, and crypto history to compute where the present sits in a cycle and what has happened more often after similar episodes, then draws Chinese charts. The code, definitions, calculated results, and charts are in this archive. Vendor data files are not bundled; the program downloads them when you run it.
+This is a working Bitcoin and economic cycle dashboard for people who track macro and crypto markets. It uses public macro, rate, commodity, and crypto history to compute where the present sits in a cycle and what has happened more often after similar episodes, then draws Chinese charts. The code, definitions, calculated results, and charts are in this archive. Vendor data files are not bundled; the program downloads them when you run it.
 
 ## 不是投资建议 / Not investment advice
 
@@ -152,6 +152,26 @@ When the menu says to ask the maintainer, match the case above: red (check Actio
 
 Chinese definitions, the word list, acceptance rules, and topic notes are in `METHODOLOGY.md`. Changing definitions means editing `pipeline/defs.py` and passing review.
 
+## FAQ
+
+**Where are we in the Bitcoin cycle?**  
+The board answers with history, not a forecast: Bitcoin's price against its 200-week moving average, how far it is below the cycle top, how long past cycles took from halving to top and from top to bottom, and how often the price was higher a year after a drop below the 200-week average. The latest reading is the chart [`看板/比特币周期/01 比特币这一轮走到哪.png`](<看板/比特币周期/01 比特币这一轮走到哪.png>) (in Chinese) and `results/board4.json`. It's a dated snapshot; run the pipeline for today's numbers.
+
+**What does the Bitcoin 200-week moving average show here?**  
+Whether the price is above or below it now, and what happened after past drops below it. Bitcoin's history is short, so many cells show counts instead of probabilities.
+
+**Is the Bitcoin four-year cycle over?**  
+The board doesn't say whether a pattern will continue. It shows how each past cycle compared on timing and depth, so you can see how far the current one fits, and it shows a pattern only if it clears the bar set in `pipeline/defs.py`.
+
+**What else does it track besides Bitcoin?**  
+The US four-year (presidential) cycle, recession signals and the business cycle, rate hikes, financial conditions, oil and gold, from FRED, Shiller, Coin Metrics, the World Bank and the IMF. Each topic has its own folder of charts under `看板/`.
+
+**Is there a macOS menu bar app?**  
+Yes, macOS only. It reads the board's status file and turns red or orange when an update fails or a market signal fires, such as Bitcoin falling below its 200-week average. See [macOS menu bar](#macos-菜单栏--macos-menu-bar).
+
+**Is this investment advice?**  
+No. Every number is a count from historical samples, not a prediction or a reason to buy or sell.
+
 ## 许可证 / License
 
 作者自己的代码用 MIT，见 `LICENSE`。数据条款、出处限制和第三方库声明分开，见 `DATA.md` 和 `NOTICES.md`。MIT 不覆盖数据，也不表示任何来源为本项目背书。
@@ -170,4 +190,13 @@ A pattern is shown only if it clears `EDGE` in `pipeline/defs.py`. Monthly avera
 
 ---
 
-**More from [Balance Zhao](https://github.com/Balance0014):** [Post-quantum blockchain map](https://github.com/Balance0014/post-quantum-blockchains) (open for submissions) · [claim-check](https://github.com/Balance0014/claude-code-claim-check) · [when-to-clear](https://github.com/Balance0014/claude-code-when-to-clear) · [one-person-ai-company](https://github.com/Balance0014/one-person-ai-company) · [telegram-rug-checker](https://github.com/Balance0014/telegram-rug-checker)
+<!-- more-from:start -->
+## More from Balance Zhao
+
+Open-source tools by [Balance Zhao](https://github.com/Balance0014), an AI and crypto creator who researches post-quantum blockchains. New tools are posted on [X @balance0014](https://x.com/balance0014).
+
+- **Crypto research:** [Post-quantum blockchain map](https://github.com/Balance0014/post-quantum-blockchains) · [Rug-pull and honeypot checker bot for Telegram](https://github.com/Balance0014/telegram-rug-checker) · **Bitcoin and economic cycle dashboard** (this repo)
+- **Claude Code and AI agents:** [Claude Code Stop hook that checks "done" claims](https://github.com/Balance0014/claude-code-claim-check) · [Claude Code token usage report and /clear reminder](https://github.com/Balance0014/claude-code-when-to-clear) · [One-person AI company playbook](https://github.com/Balance0014/one-person-ai-company)
+- **AI video and content:** [Explainer video skill for coding agents](https://github.com/Balance0014/source-to-explainer-video) · [AI pet video storyboard skill](https://github.com/Balance0014/ai-pet-short-video-director) · [Translate English videos to Chinese subtitles](https://github.com/Balance0014/video-translation-x-post) · [Trending GitHub projects to X posts](https://github.com/Balance0014/github-to-x-posts)
+- **Finding users:** [Reddit lead finder Chrome extension](https://github.com/Balance0014/reddit-lead-finder)
+<!-- more-from:end -->
