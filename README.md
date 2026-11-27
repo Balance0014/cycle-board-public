@@ -167,3 +167,7 @@ The author’s code is MIT, see `LICENSE`. Data terms and third-party notices ar
 - XEN 动态校准依赖 xen.pub 的逐日快照。公开版不附带这些快照，也不请求 xen.pub。已附带的 XEN 图是发布时算好的那一张，不能在没有快照时重新校准。见 `DATA.md`。
 
 A pattern is shown only if it clears `EDGE` in `pipeline/defs.py`. Monthly average prices are not daily prices. The financial-conditions index is revised, so backtests peek. Bitcoin and XEN samples are short. XEN live calibration is unavailable in this edition: xen.pub snapshots are not bundled and are not fetched. The shipped XEN chart is the published table.
+
+---
+
+**More from [Balance Zhao](https://github.com/Balance0014):** [Post-quantum blockchain map](https://github.com/Balance0014/post-quantum-blockchains) (open for submissions) · [claim-check](https://github.com/Balance0014/claude-code-claim-check) · [when-to-clear](https://github.com/Balance0014/claude-code-when-to-clear) · [one-person-ai-company](https://github.com/Balance0014/one-person-ai-company) · [telegram-rug-checker](https://github.com/Balance0014/telegram-rug-checker)
